@@ -49,6 +49,7 @@ swift_opts = [
     cfg.StrOpt('swift_store_auth_address'),
     cfg.StrOpt('swift_store_user', secret=True),
     cfg.StrOpt('swift_store_key', secret=True),
+    cfg.StrOpt('swift_store_region'),
     cfg.StrOpt('swift_store_auth_version', default='2'),
     cfg.StrOpt('swift_store_container',
                default=DEFAULT_CONTAINER),
@@ -83,13 +84,14 @@ class StoreLocation(glance.store.location.StoreLocation):
         self.scheme = self.specs.get('scheme', 'swift+https')
         self.user = self.specs.get('user')
         self.key = self.specs.get('key')
+        self.region = self.specs.get('region')
         self.authurl = self.specs.get('authurl')
         self.container = self.specs.get('container')
         self.obj = self.specs.get('obj')
 
     def _get_credstring(self):
         if self.user:
-            return '%s:%s@' % (urllib.quote(self.user), urllib.quote(self.key))
+            return '%s:%s:%s@' % (urllib.quote(self.user), urllib.quote(self.key), urllib.quote(self.region))
         return ''
 
     def get_uri(self):
@@ -153,14 +155,15 @@ class StoreLocation(glance.store.location.StoreLocation):
             path = path[path.find('/'):].strip('/')
         if creds:
             cred_parts = creds.split(':')
-            if len(cred_parts) != 2:
+            if len(cred_parts) != 3:
                 reason = (_("Badly formed credentials '%(creds)s' in Swift "
                             "URI") % locals())
                 LOG.error(reason)
                 raise exception.BadStoreUri()
-            user, key = cred_parts
+            user, key, region = cred_parts
             self.user = urllib.unquote(user)
             self.key = urllib.unquote(key)
+            self.region = urllib.unquote(region)
         else:
             self.user = None
         path_parts = path.split('/')
@@ -218,6 +221,7 @@ class Store(glance.store.base.Store):
         self.auth_address = self._option_get('swift_store_auth_address')
         self.user = self._option_get('swift_store_user')
         self.key = self._option_get('swift_store_key')
+        self.region = self._option_get('swift_store_region')
         self.container = CONF.swift_store_container
         try:
             # The config file has swift_store_large_object_*size in MB, but
@@ -254,7 +258,7 @@ class Store(glance.store.base.Store):
         """
         loc = location.store_location
         swift_conn = self._make_swift_connection(
-            auth_url=loc.swift_auth_url, user=loc.user, key=loc.key)
+            auth_url=loc.swift_auth_url, user=loc.user, key=loc.key, region=loc.region)
 
         try:
             (resp_headers, resp_body) = swift_conn.get_object(
@@ -289,7 +293,7 @@ class Store(glance.store.base.Store):
         """
         loc = location.store_location
         swift_conn = self._make_swift_connection(
-            auth_url=loc.swift_auth_url, user=loc.user, key=loc.key)
+            auth_url=loc.swift_auth_url, user=loc.user, key=loc.key, region=loc.region)
 
         try:
             resp_headers = swift_conn.head_object(container=loc.container,
@@ -298,7 +302,7 @@ class Store(glance.store.base.Store):
         except Exception:
             return 0
 
-    def _make_swift_connection(self, auth_url, user, key):
+    def _make_swift_connection(self, auth_url, user, key, region):
         """
         Creates a connection using the Swift client library.
         """
@@ -308,7 +312,7 @@ class Store(glance.store.base.Store):
                          else auth_url + '/')
         LOG.debug(_("Creating Swift connection with "
                     "(auth_address=%(full_auth_url)s, user=%(user)s, "
-                    "snet=%(snet)s, auth_version=%(auth_version)s)") %
+                    "region=%(region)s, snet=%(snet)s, auth_version=%(auth_version)s)") %
                   locals())
         tenant_name = None
         if self.auth_version == '2':
@@ -321,7 +325,7 @@ class Store(glance.store.base.Store):
             (tenant_name, user) = tenant_user
 
         return swiftclient.Connection(
-            authurl=full_auth_url, user=user, key=key, snet=snet,
+            authurl=full_auth_url, user=user, key=key, region=region, snet=snet,
             tenant_name=tenant_name, auth_version=auth_version)
 
     def _option_get(self, param):
@@ -370,7 +374,7 @@ class Store(glance.store.base.Store):
               fail if the image turns out to be greater than 5GB.
         """
         swift_conn = self._make_swift_connection(
-            auth_url=self.full_auth_address, user=self.user, key=self.key)
+            auth_url=self.full_auth_address, user=self.user, key=self.key, region=self.region)
 
         create_container_if_missing(self.container, swift_conn)
 
@@ -380,7 +384,8 @@ class Store(glance.store.base.Store):
                                   'obj': obj_name,
                                   'authurl': self.auth_address,
                                   'user': self.user,
-                                  'key': self.key})
+                                  'key': self.key,
+				  'region': self.region})
 
         LOG.debug(_("Adding image object '%(obj_name)s' "
                     "to Swift") % locals())
