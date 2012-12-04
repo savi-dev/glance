@@ -173,6 +173,7 @@ class StoreLocation(glance.store.location.StoreLocation):
             self.user = urllib.unquote(user)
             self.key = urllib.unquote(key)
             self.region = urllib.unquote(region)
+            LOG.debug(_("image location is %s,XXX,%s") %(self.user, self.region))
         else:
             self.user = None
             self.key = None
@@ -335,7 +336,7 @@ class Store(glance.store.base.Store):
     def _swift_connection_for_location(self, loc):
         if loc.user:
             return self._make_swift_connection(
-                loc.swift_url, loc.user, loc.key, region=self.region)
+                loc.swift_url, loc.user, loc.key, region=loc.region)
         else:
             if self.multi_tenant:
                 return self._make_swift_connection(
