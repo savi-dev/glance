@@ -137,13 +137,14 @@ class StoreLocation(glance.store.location.StoreLocation):
         self.scheme = self.specs.get('scheme', 'swift+https')
         self.user = self.specs.get('user')
         self.key = self.specs.get('key')
+        self.region = self.specs.get('region')
         self.auth_or_store_url = self.specs.get('auth_or_store_url')
         self.container = self.specs.get('container')
         self.obj = self.specs.get('obj')
 
     def _get_credstring(self):
-        if self.user and self.key:
-            return '%s:%s@' % (urllib.quote(self.user), urllib.quote(self.key))
+        if self.user and self.key and self.region:
+            return '%s:%s:%s@' % (urllib.quote(self.user), urllib.quote(self.key), urllib.quote(self.region))
         return ''
 
     def get_uri(self):
@@ -205,13 +206,14 @@ class StoreLocation(glance.store.location.StoreLocation):
             path = path[path.find('/'):].strip('/')
         if creds:
             cred_parts = creds.split(':')
-            if len(cred_parts) != 2:
+            if len(cred_parts) != 3:
                 reason = (_("Badly formed credentials in Swift URI."))
                 LOG.debug(reason)
                 raise exception.BadStoreUri()
-            user, key = cred_parts
+            user, key, region = cred_parts
             self.user = urllib.unquote(user)
             self.key = urllib.unquote(key)
+            self.region = urllib.unquote(region)
         else:
             self.user = None
             self.key = None
@@ -539,6 +541,7 @@ class SingleTenantStore(BaseStore):
         self.container = CONF.swift_store_container
         self.user = self._option_get('swift_store_user')
         self.key = self._option_get('swift_store_key')
+        self.region = self._option_get('swift_store_region')
 
     def create_location(self, image_id):
         specs = {'scheme': self.scheme,
@@ -546,7 +549,8 @@ class SingleTenantStore(BaseStore):
                  'obj': str(image_id),
                  'auth_or_store_url': self.auth_address,
                  'user': self.user,
-                 'key': self.key}
+                 'key': self.key,
+                 'region': self.region}
         return StoreLocation(specs)
 
     def get_connection(self, location):
@@ -572,7 +576,9 @@ class SingleTenantStore(BaseStore):
             user = location.user
 
         os_options = {}
-        if self.region:
+        if location.region:
+            os_options['region_name'] = location.region
+        elif self.region:
             os_options['region_name'] = self.region
         os_options['endpoint_type'] = self.endpoint_type
         os_options['service_type'] = self.service_type
